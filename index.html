@@ -1,1 +1,200 @@
-1
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Koalitionsrechner & Prognose</title>
+<style>
+  body{
+    margin:0; padding:24px; color:#fff;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto;
+    background:#0b0f14;
+  }
+  h1{margin:0 0 12px}
+  .wrap{display:grid; gap:20px; grid-template-columns:400px 1fr}
+  @media(max-width:980px){.wrap{grid-template-columns:1fr}}
+  .card{
+    background:#121823; padding:16px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.08)
+  }
+  input,select,button{
+    background:#0f1420; border:1px solid rgba(255,255,255,.15);
+    color:#fff; border-radius:8px; padding:6px 10px;
+  }
+  button{cursor:pointer}
+  svg{width:100%; height:auto; display:block}
+
+  /* Prognose Säulen */
+  .barChart{display:flex; gap:8px; align-items:flex-end; height:260px; background:#0b1d36; padding:20px; border-radius:12px}
+  .bar{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end}
+  .bar rect{transition:height 0.8s ease}
+  .bar-label{margin-top:6px; font-size:14px; text-align:center}
+  .bar-val{margin-bottom:6px; font-size:14px; font-weight:700}
+  .bar rect{rx:4px; ry:4px}
+</style>
+</head>
+<body>
+<h1>Koalitionsrechner & Prognose</h1>
+<div class="wrap">
+  <section class="card">
+    <h3>Einstellungen</h3>
+    <div>
+      <label>Sitze:</label>
+      <input id="totalSeats" type="number" value="630">
+    </div>
+    <div>
+      <label>Sperrklausel (%):</label>
+      <input id="threshold" type="number" value="5" step="0.1">
+    </div>
+    <div>
+      <label>Wahlverfahren:</label>
+      <select id="method">
+        <option value="sls">Sainte-Laguë/Schepers</option>
+        <option value="dhondt">d’Hondt</option>
+        <option value="hare">Hare-Niemeyer</option>
+      </select>
+    </div>
+    <button id="calcBtn">Neu berechnen</button>
+  </section>
+
+  <section class="card">
+    <h3>Prognose – Balkendiagramm</h3>
+    <div class="barChart" id="barChart"></div>
+    <button id="animateBarsBtn">Parteien nacheinander animieren</button>
+  </section>
+</div>
+
+<div class="card" style="margin-top:20px">
+  <h3>Sitzverteilung</h3>
+  <svg id="seatChart" viewBox="0 0 900 620" preserveAspectRatio="xMidYMin meet"></svg>
+</div>
+
+<div class="card" style="margin-top:20px">
+  <h3>Koalitionen testen</h3>
+  <div id="coalitionChecklist"></div>
+  <div style="margin-top:12px">
+    <strong>Sitze Koalition:</strong> <span id="coalSeats">0</span> |
+    <strong>Mehrheit?</strong> <span id="coalMajority" style="color:#ff6a6a">nein</span>
+  </div>
+</div>
+
+<script>
+/* ===== Beispielparteien ===== */
+const parties = [
+  {name:"CDU/CSU", pct:28, color:"#000000"},
+  {name:"SPD", pct:20, color:"#E3000F"},
+  {name:"Grüne", pct:15, color:"#1FA12E"},
+  {name:"FDP", pct:7, color:"#FFED00"},
+  {name:"AfD", pct:18, color:"#009EE0"},
+  {name:"Linke", pct:5, color:"#BE3075"},
+  {name:"BSW", pct:6, color:"#FF6A00"},
+  {name:"Andere", pct:1, color:"#b7bdc7"}
+];
+const GREY="#b7bdc7";
+let selectedCoalition=new Set();
+
+/* ===== Prognose Balken ===== */
+function renderBars(){
+  const chart=document.getElementById("barChart");
+  chart.innerHTML="";
+  parties.forEach(p=>{
+    const div=document.createElement("div");
+    div.className="bar";
+    div.innerHTML=`
+      <div class="bar-val">0%</div>
+      <svg width="100%" height="200">
+        <rect x="0" y="200" width="100%" height="0" fill="${p.color}"/>
+      </svg>
+      <div class="bar-label">${p.name}</div>
+    `;
+    chart.appendChild(div);
+  });
+}
+function animateBarsSequential(){
+  const bars=[...document.querySelectorAll(".bar")];
+  bars.reduce((delay,bar,i)=>{
+    setTimeout(()=>{
+      const rect=bar.querySelector("rect");
+      const val=bar.querySelector(".bar-val");
+      const p=parties[i];
+      const h=p.pct*2; // Maßstab
+      rect.setAttribute("height",h*2);
+      rect.setAttribute("y",200-h*2);
+      val.textContent=p.pct+"%";
+    },delay);
+    return delay+800;
+  },0);
+}
+
+/* ===== Sitzverteilung ===== */
+function drawSeats(){
+  const svg=document.getElementById("seatChart");
+  svg.innerHTML="";
+  const w=900,h=620,cx=w/2,cy=h*0.85;
+  const rOuter=260,rInner=80;
+  const seats=parseInt(document.getElementById("totalSeats").value)||630;
+
+  let totalPct=parties.reduce((a,b)=>a+b.pct,0);
+  let start=Math.PI;
+  parties.forEach(p=>{
+    if(p.name.toLowerCase()==="andere") return;
+    const share=p.pct/totalPct;
+    const sweep=share*Math.PI;
+    const x0=rOuter*Math.cos(start), y0=rOuter*Math.sin(start);
+    const x1=rOuter*Math.cos(start+sweep), y1=rOuter*Math.sin(start+sweep);
+    const x2=rInner*Math.cos(start+sweep), y2=rInner*Math.sin(start+sweep);
+    const x3=rInner*Math.cos(start), y3=rInner*Math.sin(start);
+    const d=`M${x0},${y0} A${rOuter},${rOuter} 0 0 1 ${x1},${y1} L${x2},${y2} A${rInner},${rInner} 0 0 0 ${x3},${y3}Z`;
+    const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d",d);
+    path.setAttribute("fill",p.color);
+    svg.appendChild(path);
+    start+=sweep;
+  });
+}
+
+/* ===== Koalitionen ===== */
+function renderChecklist(){
+  const wrap=document.getElementById("coalitionChecklist");
+  wrap.innerHTML="";
+  parties.filter(p=>p.name!=="Andere").forEach(p=>{
+    const lab=document.createElement("label");
+    lab.innerHTML=`
+      <input type="checkbox" data-name="${p.name}">
+      <span style="display:inline-block;width:12px;height:12px;background:${p.color}"></span>
+      ${p.name}
+    `;
+    wrap.appendChild(lab);
+  });
+  wrap.querySelectorAll("input").forEach(cb=>{
+    cb.addEventListener("change",()=>{
+      if(cb.checked) selectedCoalition.add(cb.dataset.name);
+      else selectedCoalition.delete(cb.dataset.name);
+      updateCoalition();
+    });
+  });
+}
+function updateCoalition(){
+  const seats=parseInt(document.getElementById("totalSeats").value)||630;
+  const majority=Math.floor(seats/2)+1;
+  let sum=0;
+  parties.forEach(p=>{
+    if(selectedCoalition.has(p.name)) sum+=Math.round(p.pct/100*seats);
+  });
+  document.getElementById("coalSeats").textContent=sum;
+  const maj=document.getElementById("coalMajority");
+  if(sum>=majority){maj.textContent="ja";maj.style.color="#37d07a";}
+  else{maj.textContent="nein";maj.style.color="#ff6a6a";}
+}
+
+/* ===== Events ===== */
+document.getElementById("animateBarsBtn").addEventListener("click",animateBarsSequential);
+document.getElementById("calcBtn").addEventListener("click",()=>{drawSeats();renderChecklist();});
+
+/* Start */
+renderBars();
+drawSeats();
+renderChecklist();
+</script>
+</body>
+</html>
